@@ -75,6 +75,29 @@ jobs:
             cp .env.example .env
           fi
 
+      - name: Prepare Keystores for Gradle Configuration
+        run: |
+          # 1. Restore debug.keystore from committed base64 file
+          if [ -f debug.keystore.base64 ] && [ ! -f debug.keystore ]; then
+            base64 -d debug.keystore.base64 > debug.keystore
+          fi
+
+          # 2. Ensure release keystore file exists so Gradle signingConfig evaluation passes
+          if [ -n "${{ secrets.KEYSTORE_BASE64 }}" ]; then
+            echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > "$GITHUB_WORKSPACE/my-upload-key.jks"
+            echo "KEYSTORE_PATH=$GITHUB_WORKSPACE/my-upload-key.jks" >> $GITHUB_ENV
+            echo "STORE_PASSWORD=${{ secrets.STORE_PASSWORD }}" >> $GITHUB_ENV
+            echo "KEY_PASSWORD=${{ secrets.KEY_PASSWORD }}" >> $GITHUB_ENV
+          else
+            keytool -genkeypair -v -keystore "$GITHUB_WORKSPACE/my-upload-key.jks" \
+              -alias upload -keyalg RSA -keysize 2048 -validity 10000 \
+              -storepass android -keypass android \
+              -dname "CN=Sonora, OU=Mobile, O=Sonora, L=Jakarta, ST=Jakarta, C=ID"
+            echo "KEYSTORE_PATH=$GITHUB_WORKSPACE/my-upload-key.jks" >> $GITHUB_ENV
+            echo "STORE_PASSWORD=android" >> $GITHUB_ENV
+            echo "KEY_PASSWORD=android" >> $GITHUB_ENV
+          fi
+
       - name: Run Unit & Robolectric Tests
         run: ./gradlew :app:testDebugUnitTest --no-daemon
 
@@ -114,12 +137,18 @@ jobs:
             cp .env.example .env
           fi
 
-      - name: Setup Signing Keystore
+      - name: Setup Keystores for Release Signing
         id: setup_keystore
         run: |
+          # 1. Restore debug.keystore from committed base64 file
+          if [ -f debug.keystore.base64 ] && [ ! -f debug.keystore ]; then
+            base64 -d debug.keystore.base64 > debug.keystore
+          fi
+
+          # 2. Setup release keystore
           if [ -n "${{ secrets.KEYSTORE_BASE64 }}" ]; then
             echo "Menggunakan release keystore dari GitHub Secrets..."
-            echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > "$GITHUB_WORKSPACE/my-upload-key.jks"
+            echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > "$GITHUB_WORKSPACE/my-upload-key.jks"
             echo "KEYSTORE_PATH=$GITHUB_WORKSPACE/my-upload-key.jks" >> $GITHUB_ENV
             echo "STORE_PASSWORD=${{ secrets.STORE_PASSWORD }}" >> $GITHUB_ENV
             echo "KEY_PASSWORD=${{ secrets.KEY_PASSWORD }}" >> $GITHUB_ENV
