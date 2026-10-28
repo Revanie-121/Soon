@@ -1,0 +1,225 @@
+name: Build and Publish Sonora Android App
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    tags:
+      - 'v*.*.*'
+  pull_request:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+    inputs:
+      build_type:
+        description: 'Build Type'
+        required: true
+        default: 'release'
+        type: choice
+        options:
+          - 'release'
+          - 'debug'
+      publish_github_release:
+        description: 'Publish assets to GitHub Releases'
+        required: true
+        default: true
+        type: boolean
+      publish_google_play:
+        description: 'Publish AAB to Google Play Console'
+        required: false
+        default: false
+        type: boolean
+      play_track:
+        description: 'Google Play Track (if publishing to Play Store)'
+        required: false
+        default: 'internal'
+        type: choice
+        options:
+          - 'internal'
+          - 'alpha'
+          - 'beta'
+          - 'production'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Run Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Grant Execute Permission for Gradlew
+        run: chmod +x gradlew
+
+      - name: Prepare Local Environment File
+        run: |
+          if [ ! -f .env ]; then
+            cp .env.example .env
+          fi
+
+      - name: Run Unit & Robolectric Tests
+        run: ./gradlew :app:testDebugUnitTest --no-daemon
+
+      - name: Upload Test Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-report
+          path: app/build/reports/tests/testDebugUnitTest/
+          retention-days: 7
+
+  build_and_publish:
+    name: Build & Publish App
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Grant Execute Permission for Gradlew
+        run: chmod +x gradlew
+
+      - name: Prepare Local Environment File
+        run: |
+          if [ ! -f .env ]; then
+            cp .env.example .env
+          fi
+
+      - name: Setup Signing Keystore
+        id: setup_keystore
+        run: |
+          if [ -n "${{ secrets.KEYSTORE_BASE64 }}" ]; then
+            echo "Menggunakan release keystore dari GitHub Secrets..."
+            echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > "$GITHUB_WORKSPACE/my-upload-key.jks"
+            echo "KEYSTORE_PATH=$GITHUB_WORKSPACE/my-upload-key.jks" >> $GITHUB_ENV
+            echo "STORE_PASSWORD=${{ secrets.STORE_PASSWORD }}" >> $GITHUB_ENV
+            echo "KEY_PASSWORD=${{ secrets.KEY_PASSWORD }}" >> $GITHUB_ENV
+            echo "using_secret_keystore=true" >> $GITHUB_OUTPUT
+          else
+            echo "Secret KEYSTORE_BASE64 tidak ditemukan. Membuat keystore penandatanganan sementara..."
+            keytool -genkeypair -v -keystore "$GITHUB_WORKSPACE/my-upload-key.jks" \
+              -alias upload -keyalg RSA -keysize 2048 -validity 10000 \
+              -storepass android -keypass android \
+              -dname "CN=Sonora, OU=Mobile, O=Sonora, L=Jakarta, ST=Jakarta, C=ID"
+            echo "KEYSTORE_PATH=$GITHUB_WORKSPACE/my-upload-key.jks" >> $GITHUB_ENV
+            echo "STORE_PASSWORD=android" >> $GITHUB_ENV
+            echo "KEY_PASSWORD=android" >> $GITHUB_ENV
+            echo "using_secret_keystore=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build Release APK
+        run: ./gradlew :app:assembleRelease --no-daemon
+
+      - name: Build Release App Bundle (AAB)
+        run: ./gradlew :app:bundleRelease --no-daemon
+
+      - name: Organize Build Outputs
+        id: organize_artifacts
+        run: |
+          mkdir -p output_artifacts
+          
+          # Salin APK Release
+          APK_FILE=$(find app/build/outputs/apk/release -name "*.apk" | head -n 1)
+          if [ -f "$APK_FILE" ]; then
+            cp "$APK_FILE" output_artifacts/Sonora-release.apk
+            echo "apk_exists=true" >> $GITHUB_OUTPUT
+          fi
+
+          # Salin AAB Release
+          AAB_FILE=$(find app/build/outputs/bundle/release -name "*.aab" | head -n 1)
+          if [ -f "$AAB_FILE" ]; then
+            cp "$AAB_FILE" output_artifacts/Sonora-release.aab
+            echo "aab_exists=true" >> $GITHUB_OUTPUT
+          fi
+
+          echo "Daftar file output yang siap dipublikasikan:"
+          ls -la output_artifacts/
+
+      - name: Upload Artifacts to GitHub Actions
+        uses: actions/upload-artifact@v4
+        with:
+          name: Sonora-Android-Build
+          path: output_artifacts/
+          retention-days: 30
+
+      - name: Compute Release Tag
+        id: release_tag
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+          else
+            TAG="v1.0.$(date +'%Y%m%d%H%M')"
+          fi
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+
+      - name: Publish to GitHub Releases
+        if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && github.event.inputs.publish_github_release == 'true') || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.release_tag.outputs.tag }}
+          name: Sonora Release ${{ steps.release_tag.outputs.tag }}
+          body: |
+            ## 🎵 Sonora — Music Search & Download
+            
+            Rilis otomatis dibuat oleh **GitHub Actions**.
+            
+            - **Versi:** `${{ steps.release_tag.outputs.tag }}`
+            - **Commit SHA:** `${{ github.sha }}`
+            - **Waktu Build:** `$(date -u +"%Y-%m-%d %H:%M:%S UTC")`
+            
+            ### 📦 File Rilis yang Tersedia:
+            1. **`Sonora-release.apk`**: Paket aplikasi siap pasang (*sideload*) langsung di smartphone Android.
+            2. **`Sonora-release.aab`**: Paket Android App Bundle teroptimasi untuk Google Play Console.
+            
+            ### ✨ Fitur Utama:
+            - Pencarian metadata musik Amazon Music real-time dengan filter kategori.
+            - Generator kanonis URL Amazon Music berdasarkan ASIN (Track & Album).
+            - Download queue dengan real-time status polling dan penanganan error.
+            - Deteksi direct download link otomatis dari worker `lucidadl`.
+            - Penyimpanan persisten lokal SQLite & Room.
+          files: |
+            output_artifacts/Sonora-release.apk
+            output_artifacts/Sonora-release.aab
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish to Google Play Console
+        if: (github.event_name == 'workflow_dispatch' && github.event.inputs.publish_google_play == 'true') && env.HAS_PLAY_SECRET == 'true'
+        uses: r0adkll/upload-google-play@v1
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.PLAY_CONFIG_JSON }}
+          packageName: com.aistudio.sonora.musica
+          releaseFiles: output_artifacts/Sonora-release.aab
+          track: ${{ github.event.inputs.play_track || 'internal' }}
+          status: 'completed'
+        env:
+          HAS_PLAY_SECRET: ${{ secrets.PLAY_CONFIG_JSON != '' }}

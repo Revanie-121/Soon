@@ -97,3 +97,12 @@ sonora/
 2. Buka tab **Settings**, masukkan URL backend (misal: `http://10.0.2.2:8000` di emulator atau URL Cloudflare Tunnel).
 3. Klik **Uji Ping** untuk memastikan status berubah menjadi **ONLINE**.
 4. Kembali ke tab **Search**, cari musik atau masukkan ASIN manual (misal: `B00C069H6M`), lalu tekan **Unduh**.
+
+---
+
+## Otomatisasi CI/CD (GitHub Actions)
+
+Script workflow otomatis tersimpan di `.github/workflows/build_and_publish.yml`.
+- **Pemicu Otomatis:** Setiap kali Anda membuat tag rilis (misal `git tag v1.0.0 && git push origin v1.0.0`) atau melakukan push ke branch `main`.
+- **Hasil Build:** Otomatis menghasilkan dan mempublikasikan file **`Sonora-release.apk`** dan **`Sonora-release.aab`** ke tab **GitHub Releases** repositori Anda.
+- Panduan lengkap konfigurasi penandatanganan keystore tersedia di `docs/CI_CD_BUILD_PUBLISH.md`.
