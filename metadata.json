@@ -1,0 +1,6 @@
+{
+  "name": "Sonora",
+  "description": "Music search and download manager connecting Amazon Music metadata to the lucidadl processing engine.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
