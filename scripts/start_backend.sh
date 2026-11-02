@@ -23,5 +23,17 @@ proot-distro login ubuntu -- bash -c "
     echo 'Executable: '\$LUCIDADL_EXECUTABLE
     echo 'Xvfb: '\$XVFB_RUN_EXECUTABLE
 
-    python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+    if [ -f '/root/sonora/server.py' ]; then
+        echo 'Menjalankan /root/sonora/server.py...'
+        python3 /root/sonora/server.py
+    elif [ -f '/root/sonora/backend/server.py' ]; then
+        echo 'Menjalankan /root/sonora/backend/server.py...'
+        python3 /root/sonora/backend/server.py
+    elif [ -f '$DIR/server.py' ]; then
+        echo 'Menjalankan server.py dari direktori proyek...'
+        python3 '$DIR/server.py'
+    else
+        echo 'Menjalankan app.main:app...'
+        python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+    fi
 "

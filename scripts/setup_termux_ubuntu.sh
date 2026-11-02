@@ -10,6 +10,8 @@ echo "======================================================"
 echo "    SONORA - SETUP TERMUX & UBUNTU PROOT-DISTRO       "
 echo "======================================================"
 
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
 # 1. Update Termux Packages
 echo "[1/5] Memperbarui paket Termux..."
 pkg update -y && pkg upgrade -y
@@ -44,10 +46,16 @@ proot-distro login ubuntu -- bash -c "
     pip install --upgrade pip
     pip install fastapi uvicorn pydantic pydantic-settings httpx aiosqlite
 
-    echo 'Memverifikasi keberadaan lucidadl...'
-    # Pengguna dapat memasang lucidadl di venv ini dengan:
-    # pip install lucidadl
+    echo 'Memasang lucidadl dan dependensi...'
+    pip install lucidadl || true
 "
+
+# Salin server.py ke dalam Ubuntu proot-distro
+UBUNTU_FS="$PREFIX/var/lib/proot-distro/installed-rootfs/ubuntu/root/sonora"
+if [ -d "$UBUNTU_FS" ] && [ -f "$DIR/server.py" ]; then
+    echo "Menyalin server.py ke lingkungan Ubuntu ($UBUNTU_FS/server.py)..."
+    cp "$DIR/server.py" "$UBUNTU_FS/server.py"
+fi
 
 echo "[4/5] Menguji perintah xvfb-run..."
 proot-distro login ubuntu -- bash -c "xvfb-run --help > /dev/null 2>&1 && echo 'xvfb-run siap digunakan!' || echo 'Periksa xvfb-run'"
